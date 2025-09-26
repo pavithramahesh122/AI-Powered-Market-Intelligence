@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Market Intelligence Query Interface</title>
+    <!-- Load Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Custom scrollbar styling for better aesthetics */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #4B5563; /* Gray-600 */
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #1F2937; /* Gray-800 */
+        }
+        
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        /* Style for the loading spinner */
+        .loader {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #3B82F6; /* Blue-500 */
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen p-4 sm:p-8">
+
+    <div class="max-w-4xl mx-auto space-y-12">
+        
+        <header class="text-center pb-4 border-b border-gray-700">
+            <h1 class="text-4xl font-extrabold text-blue-400">Market Intelligence AI Query Tool</h1>
+            <p class="text-gray-400 mt-2">Interact with your generated report data and create market assets.</p>
+        </header>
+
+        <!-- Tool Selection Tabs -->
+        <div class="flex space-x-2 bg-gray-800 p-1 rounded-lg shadow-xl">
+            <button id="tab-query" onclick="showPanel('query')" class="flex-1 py-3 text-sm font-medium rounded-md transition-colors bg-blue-500 text-white shadow-lg">
+                Query Insights Report
+            </button>
+            <button id="tab-creative" onclick="showPanel('creative')" class="flex-1 py-3 text-sm font-medium rounded-md text-gray-400 hover:bg-gray-700 hover:text-white transition-colors">
+                AI Creative Generator
+            </button>
+        </div>
+
+        <!-- Global JSON Data Storage -->
+        <script>
+            let insightsJsonData = null; // Data will be loaded via file upload
+        </script>
+
+        <!-- 1. AI Insight Query Panel -->
+        <div id="panel-query" class="panel space-y-6">
+            <h2 class="text-2xl font-semibold border-l-4 border-blue-500 pl-3">Ask about the Report</h2>
+            
+            <!-- File Upload Component -->
+            <div id="data-status-container" class="p-4 rounded-lg border border-gray-600 bg-gray-800">
+                <p class="text-sm font-medium text-blue-400 mb-2">Report Data Status:</p>
+                <div class="flex items-center space-x-3 flex-wrap">
+                    <!-- Hidden file input triggered by the button -->
+                    <input type="file" id="json-file-input" accept=".json" class="hidden" onchange="handleFileUpload(event)">
+                    
+                    <button onclick="document.getElementById('json-file-input').click()" id="upload-button"
+                            class="bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded-lg transition-colors shadow-md my-1">
+                        Upload insights.json File
+                    </button>
+                    <span id="file-status" class="text-yellow-400 my-1">Awaiting file upload...</span>
+                </div>
+            </div>
+            <!-- End File Upload Component -->
+
+            <p class="text-gray-400">Ask the AI a specific question based on the loaded insights.</p>
+
+            <div class="flex flex-col sm:flex-row space-y-4 sm:space-y-0 sm:space-x-4">
+                <input type="text" id="query-input" placeholder="e.g., What are the high priority recommendations for growth opportunities?" 
+                       class="flex-grow p-3 rounded-lg bg-gray-700 border border-gray-600 focus:ring-blue-500 focus:border-blue-500 text-white">
+                <button onclick="handleInsightQuery()" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg transition-colors shadow-md flex items-center justify-center">
+                    <span id="query-button-text">Get Answer</span>
+                    <div id="query-loader" class="loader ml-3 hidden"></div>
+                </button>
+            </div>
+
+            <div id="query-result-container" class="bg-gray-800 p-5 rounded-lg border border-gray-700 shadow-inner">
+                <h3 class="text-lg font-medium text-blue-400 mb-2">AI Response:</h3>
+                <p id="query-result" class="text-gray-300 whitespace-pre-wrap">The AI will analyze the report JSON and provide the answer here.</p>
+            </div>
+        </div>
+
+        <!-- 2. AI Creative Generator Panel -->
+        <div id="panel-creative" class="panel space-y-6 hidden">
+            <h2 class="text-2xl font-semibold border-l-4 border-blue-500 pl-3">Generate Creative Marketing Copy</h2>
+            <p class="text-gray-400">Generate a tweet or ad copy for a product in a specific market category.</p>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                    <label for="category-select" class="block text-sm font-medium text-gray-300 mb-1">Select App Category</label>
+                    <select id="category-select" class="w-full p-3 rounded-lg bg-gray-700 border border-gray-600 text-white focus:ring-blue-500 focus:border-blue-500">
+                        <option value="Finance">Finance</option>
+                        <option value="Game">Game</option>
+                        <option value="Family">Family</option>
+                        <option value="Health & Fitness">Health & Fitness</option>
+                        <option value="Tools">Tools</option>
+                        <option value="Social">Social</option>
+                    </select>
+                </div>
+                <div>
+                    <label for="content-type" class="block text-sm font-medium text-gray-300 mb-1">Content Type</label>
+                    <select id="content-type" class="w-full p-3 rounded-lg bg-gray-700 border border-gray-600 text-white focus:ring-blue-500 focus:border-blue-500">
+                        <option value="a compelling Twitter thread (2-3 tweets)">Twitter Thread</option>
+                        <option value="a short, attention-grabbing ad copy for Instagram">Instagram Ad Copy</option>
+                        <option value="a technical press release headline">Technical Press Release Headline</option>
+                    </select>
+                </div>
+            </div>
+
+            <button onclick="handleCreativeGeneration()" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 rounded-lg transition-colors shadow-md flex items-center justify-center">
+                <span id="creative-button-text">Generate Creative Content</span>
+                <div id="creative-loader" class="loader ml-3 hidden" style="border-top-color: #10B981;"></div>
+            </button>
+
+            <div id="creative-result-container" class="bg-gray-800 p-5 rounded-lg border border-gray-700 shadow-inner">
+                <h3 class="text-lg font-medium text-green-400 mb-2">Generated Content:</h3>
+                <p id="creative-result" class="text-gray-300 whitespace-pre-wrap">The AI will generate marketing copy based on your selection here.</p>
+            </div>
+        </div>
+        
+    </div>
+    
+    <script>
+        // --- Configuration ---
+        const API_URL_BASE = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=';
+        const apiKey = ""; // Canvas will provide this at runtime
+
+        // --- Utility Functions ---
+
+        function showPanel(panelId) {
+            document.querySelectorAll('.panel').forEach(panel => panel.classList.add('hidden'));
+            document.getElementById(`panel-${panelId}`).classList.remove('hidden');
+            
+            document.querySelectorAll('button[id^="tab-"]').forEach(button => {
+                button.classList.remove('bg-blue-500', 'text-white', 'hover:bg-gray-700', 'text-gray-400');
+                if (button.id === `tab-${panelId}`) {
+                    button.classList.add('bg-blue-500', 'text-white');
+                } else {
+                    button.classList.add('text-gray-400', 'hover:bg-gray-700');
+                }
+            });
+        }
+        
+        // Custom message box replacement for alert()
+        function showMessage(title, message, isError = false) {
+            const container = document.getElementById('query-result-container');
+            const color = isError ? 'text-red-400' : 'text-yellow-400';
+            container.innerHTML = `
+                <h3 class="text-lg font-medium ${color} mb-2">${title}:</h3>
+                <p class="text-gray-300 whitespace-pre-wrap">${message}</p>
+            `;
+        }
+
+        function setLoader(type, isLoading) {
+            if (type === 'query') {
+                const loader = document.getElementById('query-loader');
+                const text = document.getElementById('query-button-text');
+                if (isLoading) {
+                    text.textContent = 'Analyzing...';
+                    loader.classList.remove('hidden');
+                } else {
+                    text.textContent = 'Get Answer';
+                    loader.classList.add('hidden');
+                }
+            } else if (type === 'creative') {
+                const loader = document.getElementById('creative-loader');
+                const text = document.getElementById('creative-button-text');
+                if (isLoading) {
+                    text.textContent = 'Generating...';
+                    loader.classList.remove('hidden');
+                } else {
+                    text.textContent = 'Generate Creative Content';
+                    loader.classList.add('hidden');
+                }
+            }
+        }
+        
+        async function fetchWithRetry(url, options, retries = 3) {
+            for (let i = 0; i < retries; i++) {
+                try {
+                    const response = await fetch(url, options);
+                    if (response.ok) {
+                        return response;
+                    }
+                    if (response.status === 429) { // Too Many Requests
+                        const delay = Math.pow(2, i) * 1000 + Math.random() * 1000;
+                        console.warn(`Rate limit hit. Retrying in ${delay / 1000}s...`);
+                        await new Promise(resolve => setTimeout(resolve, delay));
+                        continue;
+                    }
+                    throw new Error(`API request failed with status ${response.status}`);
+                } catch (error) {
+                    if (i === retries - 1) throw error;
+                    const delay = Math.pow(2, i + 1) * 1000 + Math.random() * 1000;
+                    console.error(`Attempt ${i + 1} failed: ${error.message}. Retrying in ${delay / 1000}s...`);
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                }
+            }
+        }
+
+        // --- New File Upload Handler ---
+        function updateFileStatus(message, isSuccess = false) {
+            const statusElement = document.getElementById('file-status');
+            statusElement.textContent = message;
+            if (isSuccess) {
+                statusElement.className = 'text-green-400 my-1';
+            } else if (message.includes('Error')) {
+                statusElement.className = 'text-red-400 my-1';
+            } else {
+                statusElement.className = 'text-yellow-400 my-1';
+            }
+        }
+
+        function handleFileUpload(event) {
+            const file = event.target.files[0];
+            if (!file) {
+                updateFileStatus('No file selected.');
+                insightsJsonData = null;
+                return;
+            }
+
+            if (file.type !== 'application/json') {
+                updateFileStatus('Error: Please upload a JSON file.', false);
+                insightsJsonData = null;
+                return;
+            }
+
+            updateFileStatus(`Loading "${file.name}"...`);
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    // Attempt to parse the file content
+                    insightsJsonData = JSON.parse(e.target.result);
+                    updateFileStatus(`Success: "${file.name}" loaded and ready!`, true);
+                } catch (error) {
+                    insightsJsonData = null;
+                    console.error("JSON Parsing Error:", error);
+                    updateFileStatus('Error: Failed to parse JSON file content. Check console for details.', false);
+                }
+            };
+
+            reader.onerror = function(e) {
+                insightsJsonData = null;
+                console.error("File Read Error:", e);
+                updateFileStatus('Error: Failed to read file.', false);
+            };
+
+            reader.readAsText(file);
+        }
+
+        // --- Core Application Logic (unchanged from logic perspective) ---
+
+        // 1. Insight Query Handler
+        async function handleInsightQuery() {
+            const query = document.getElementById('query-input').value.trim();
+            const resultElement = document.getElementById('query-result');
+
+            if (!query) {
+                resultElement.textContent = "Please enter a question to query the report.";
+                return;
+            }
+            if (!insightsJsonData) {
+                showMessage("Data Error", "Insights report data is missing. Please use the 'Upload insights.json File' button to load your data.", true);
+                return;
+            }
+
+            setLoader('query', true);
+            resultElement.textContent = "Processing your query...";
+
+            // Use stringify to convert the JS object back into a string for the model
+            const jsonString = JSON.stringify(insightsJsonData, null, 2);
+            
+            const systemPrompt = "You are a market intelligence analyst. Your task is to use the provided JSON data, which contains key market insights and recommendations, to answer the user's question concisely. Only use information available in the JSON.";
+            
+            const userQuery = `Analyze the following JSON report data and answer the user's request.
+                
+                USER REQUEST: ${query}
+                
+                JSON REPORT DATA:
+                ---
+                ${jsonString}
+                ---`;
+
+            try {
+                const payload = {
+                    contents: [{ parts: [{ text: userQuery }] }],
+                    systemInstruction: { parts: [{ text: systemPrompt }] },
+                };
+
+                const apiUrl = `${API_URL_BASE}${apiKey}`;
+                const response = await fetchWithRetry(apiUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                
+                const result = await response.json();
+                const generatedText = result.candidates?.[0]?.content?.parts?.[0]?.text || "Error: Could not retrieve a response from the API. Check the console for details.";
+                
+                resultElement.textContent = generatedText;
+
+            } catch (error) {
+                resultElement.textContent = `API Error: Failed to process query. Details: ${error.message}`;
+                console.error("Gemini API Error:", error);
+            } finally {
+                setLoader('query', false);
+            }
+        }
+
+        // 2. Creative Generation Handler
+        async function handleCreativeGeneration() {
+            const category = document.getElementById('category-select').value;
+            const contentType = document.getElementById('content-type').value;
+            const resultElement = document.getElementById('creative-result');
+
+            setLoader('creative', true);
+            resultElement.textContent = "Generating creative copy...";
+
+            const systemPrompt = `You are a creative marketing expert. Generate high-impact, engaging marketing content for a mobile application in the specified category. Use a confident and benefit-driven tone.`;
+            
+            const userQuery = `Write ${contentType} for a new, highly-rated app in the "${category}" category. Focus on unique user benefits and encourage high engagement.`;
+
+            try {
+                const payload = {
+                    contents: [{ parts: [{ text: userQuery }] }],
+                    systemInstruction: { parts: [{ text: systemPrompt }] },
+                };
+
+                const apiUrl = `${API_URL_BASE}${apiKey}`;
+                const response = await fetchWithRetry(apiUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                
+                const result = await response.json();
+                const generatedText = result.candidates?.[0]?.content?.parts?.[0]?.text || "Error: Could not retrieve creative content from the API. Check the console for details.";
+                
+                resultElement.textContent = generatedText;
+
+            } catch (error) {
+                resultElement.textContent = `API Error: Failed to generate creative content. Details: ${error.message}`;
+                console.error("Gemini API Error:", error);
+            } finally {
+                setLoader('creative', false);
+            }
+        }
+        
+        // --- Initialization ---
+        document.addEventListener('DOMContentLoaded', () => {
+            showPanel('query'); // Default view
+        });
+
+    </script>
+</body>
+</html>
