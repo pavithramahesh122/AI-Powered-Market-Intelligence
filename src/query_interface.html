@@ -35,6 +35,15 @@
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
         }
+        /* Custom list style for rendered Markdown */
+        .result-content ul {
+            margin: 0.5rem 0;
+            padding-left: 1.5rem;
+            list-style-type: disc;
+        }
+        .result-content li {
+            margin-bottom: 0.25rem;
+        }
     </style>
 </head>
 <body class="bg-gray-900 text-gray-100 min-h-screen p-4 sm:p-8">
@@ -85,7 +94,7 @@
 
             <div class="flex flex-col sm:flex-row space-y-4 sm:space-y-0 sm:space-x-4">
                 <input type="text" id="query-input" placeholder="e.g., What are the high priority recommendations for growth opportunities?" 
-                       class="flex-grow p-3 rounded-lg bg-gray-700 border border-gray-600 focus:ring-blue-500 focus:border-blue-500 text-white">
+                        class="flex-grow p-3 rounded-lg bg-gray-700 border border-gray-600 focus:ring-blue-500 focus:border-blue-500 text-white">
                 <button onclick="handleInsightQuery()" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg transition-colors shadow-md flex items-center justify-center">
                     <span id="query-button-text">Get Answer</span>
                     <div id="query-loader" class="loader ml-3 hidden"></div>
@@ -94,7 +103,8 @@
 
             <div id="query-result-container" class="bg-gray-800 p-5 rounded-lg border border-gray-700 shadow-inner">
                 <h3 class="text-lg font-medium text-blue-400 mb-2">AI Response:</h3>
-                <p id="query-result" class="text-gray-300 whitespace-pre-wrap">The AI will analyze the report JSON and provide the answer here.</p>
+                <!-- Changed to a <div> to properly render block-level HTML elements from Markdown -->
+                <div id="query-result" class="text-gray-300 result-content space-y-3">The AI will analyze the report JSON and provide the answer here.</div>
             </div>
         </div>
 
@@ -132,7 +142,8 @@
 
             <div id="creative-result-container" class="bg-gray-800 p-5 rounded-lg border border-gray-700 shadow-inner">
                 <h3 class="text-lg font-medium text-green-400 mb-2">Generated Content:</h3>
-                <p id="creative-result" class="text-gray-300 whitespace-pre-wrap">The AI will generate marketing copy based on your selection here.</p>
+                <!-- Changed to a <div> to properly render block-level HTML elements from Markdown -->
+                <div id="creative-result" class="text-gray-300 result-content space-y-3">The AI will generate marketing copy based on your selection here.</div>
             </div>
         </div>
         
@@ -140,10 +151,55 @@
     
     <script>
         // --- Configuration ---
-        const API_URL_BASE = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=';
+        // Updated model name for better performance and compliance with best practices
+        const MODEL_NAME = 'gemini-2.5-flash-preview-05-20';
+        const API_URL_BASE = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent?key=`;
         const apiKey = ""; // Canvas will provide this at runtime
 
         // --- Utility Functions ---
+
+        /**
+         * Converts basic Markdown (headings, bold, lists, paragraphs) to HTML.
+         */
+        function markdownToHtml(markdown) {
+            let html = markdown;
+
+            // 1. Bold/Strong
+            html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+            
+            // 2. Headings (H2 and H3 with Tailwind classes)
+            // Note: Using H3 and H4 for visual hierarchy within the result container
+            html = html.replace(/^### (.*$)/gim, '<h4 class="text-xl font-semibold mt-4 mb-2 text-blue-300">$1</h4>');
+            html = html.replace(/^## (.*$)/gim, '<h3 class="text-lg font-bold mt-4 mb-2 text-blue-400">$1</h3>');
+
+            // 3. Lists (Simple unordered list conversion)
+            // This captures consecutive lines starting with '- ' and wraps them in <ul>.
+            const listRegex = /(\n|^)(- .*(\n- .*)*)/g;
+            html = html.replace(listRegex, (match, p1, p2) => {
+                // p2 contains the list items, potentially multiline
+                let items = p2.trim().split('\n- ').map(item => item.replace(/^- /, '')).join('</li><li>');
+                // Ensure the list items are wrapped correctly
+                return `${p1}<ul class="list-disc list-inside ml-4 space-y-1">${items ? `<li>${items}</li>` : ''}</ul>`;
+            });
+            
+            // 4. Paragraphs and Line Breaks
+            // Split by double newlines to create paragraph blocks.
+            // If the block is already a heading or list, don't wrap it.
+            html = html.split('\n\n').map(p => {
+                const trimmedP = p.trim();
+                // Check if it's already an HTML block element (Heading or List)
+                if (trimmedP.length === 0 || trimmedP.startsWith('<h') || trimmedP.startsWith('<ul')) {
+                    return trimmedP;
+                }
+                // Otherwise, wrap it in a paragraph and convert single newlines to <br>
+                return `<p class="mt-2">${trimmedP.replace(/\n/g, '<br>')}</p>`;
+            }).join('\n');
+            
+            // Clean up any remaining artifacts or empty paragraphs
+            html = html.replace(/<p class="mt-2">\s*<\/p>/g, '');
+            
+            return html;
+        }
 
         function showPanel(panelId) {
             document.querySelectorAll('.panel').forEach(panel => panel.classList.add('hidden'));
@@ -163,9 +219,11 @@
         function showMessage(title, message, isError = false) {
             const container = document.getElementById('query-result-container');
             const color = isError ? 'text-red-400' : 'text-yellow-400';
+            
+            // Use innerHTML to inject the content, converted from Markdown
             container.innerHTML = `
                 <h3 class="text-lg font-medium ${color} mb-2">${title}:</h3>
-                <p class="text-gray-300 whitespace-pre-wrap">${message}</p>
+                <div id="query-result" class="text-gray-300 result-content space-y-3">${markdownToHtml(message)}</div>
             `;
         }
 
@@ -173,6 +231,10 @@
             if (type === 'query') {
                 const loader = document.getElementById('query-loader');
                 const text = document.getElementById('query-button-text');
+                const input = document.getElementById('query-input');
+                
+                input.disabled = isLoading;
+
                 if (isLoading) {
                     text.textContent = 'Analyzing...';
                     loader.classList.remove('hidden');
@@ -183,6 +245,10 @@
             } else if (type === 'creative') {
                 const loader = document.getElementById('creative-loader');
                 const text = document.getElementById('creative-button-text');
+                const button = document.querySelector('#panel-creative button');
+
+                button.disabled = isLoading;
+
                 if (isLoading) {
                     text.textContent = 'Generating...';
                     loader.classList.remove('hidden');
@@ -206,24 +272,26 @@
                         await new Promise(resolve => setTimeout(resolve, delay));
                         continue;
                     }
-                    throw new Error(`API request failed with status ${response.status}`);
+                    // Handle non-429 non-OK responses
+                    const errorBody = await response.text();
+                    throw new Error(`API request failed with status ${response.status}. Body: ${errorBody}`);
                 } catch (error) {
                     if (i === retries - 1) throw error;
                     const delay = Math.pow(2, i + 1) * 1000 + Math.random() * 1000;
-                    console.error(`Attempt ${i + 1} failed: ${error.message}. Retrying in ${delay / 1000}s...`);
+                    // Note: Suppress console error output for retries unless necessary
                     await new Promise(resolve => setTimeout(resolve, delay));
                 }
             }
         }
 
-        // --- New File Upload Handler ---
+        // --- File Upload Handler ---
         function updateFileStatus(message, isSuccess = false) {
             const statusElement = document.getElementById('file-status');
             statusElement.textContent = message;
             if (isSuccess) {
-                statusElement.className = 'text-green-400 my-1';
+                statusElement.className = 'text-green-400 my-1 font-semibold';
             } else if (message.includes('Error')) {
-                statusElement.className = 'text-red-400 my-1';
+                statusElement.className = 'text-red-400 my-1 font-semibold';
             } else {
                 statusElement.className = 'text-yellow-400 my-1';
             }
@@ -248,7 +316,6 @@
             const reader = new FileReader();
             reader.onload = function(e) {
                 try {
-                    // Attempt to parse the file content
                     insightsJsonData = JSON.parse(e.target.result);
                     updateFileStatus(`Success: "${file.name}" loaded and ready!`, true);
                 } catch (error) {
@@ -267,7 +334,7 @@
             reader.readAsText(file);
         }
 
-        // --- Core Application Logic (unchanged from logic perspective) ---
+        // --- Core Application Logic ---
 
         // 1. Insight Query Handler
         async function handleInsightQuery() {
@@ -275,7 +342,7 @@
             const resultElement = document.getElementById('query-result');
 
             if (!query) {
-                resultElement.textContent = "Please enter a question to query the report.";
+                resultElement.innerHTML = markdownToHtml("Please enter a question to query the report.");
                 return;
             }
             if (!insightsJsonData) {
@@ -284,12 +351,13 @@
             }
 
             setLoader('query', true);
-            resultElement.textContent = "Processing your query...";
+            resultElement.innerHTML = "Processing your query..."; // Set raw text before conversion
 
             // Use stringify to convert the JS object back into a string for the model
             const jsonString = JSON.stringify(insightsJsonData, null, 2);
             
-            const systemPrompt = "You are a market intelligence analyst. Your task is to use the provided JSON data, which contains key market insights and recommendations, to answer the user's question concisely. Only use information available in the JSON.";
+            // NOTE: System prompt emphasizes reliance only on the provided JSON data.
+            const systemPrompt = "You are a market intelligence analyst. Your task is to use the provided JSON data, which contains key market insights and recommendations, to answer the user's question concisely. Only use information available in the JSON. Structure your answer using headings (## or ###) and bullet points (- ) where appropriate. Use **bold text** to highlight key figures or conclusions.";
             
             const userQuery = `Analyze the following JSON report data and answer the user's request.
                 
@@ -316,10 +384,11 @@
                 const result = await response.json();
                 const generatedText = result.candidates?.[0]?.content?.parts?.[0]?.text || "Error: Could not retrieve a response from the API. Check the console for details.";
                 
-                resultElement.textContent = generatedText;
+                // Use innerHTML and convert Markdown for rich display
+                resultElement.innerHTML = markdownToHtml(generatedText);
 
             } catch (error) {
-                resultElement.textContent = `API Error: Failed to process query. Details: ${error.message}`;
+                resultElement.innerHTML = markdownToHtml(`API Error: Failed to process query. Details: **${error.message}**`);
                 console.error("Gemini API Error:", error);
             } finally {
                 setLoader('query', false);
@@ -333,9 +402,9 @@
             const resultElement = document.getElementById('creative-result');
 
             setLoader('creative', true);
-            resultElement.textContent = "Generating creative copy...";
+            resultElement.innerHTML = "Generating creative copy..."; // Set raw text before conversion
 
-            const systemPrompt = `You are a creative marketing expert. Generate high-impact, engaging marketing content for a mobile application in the specified category. Use a confident and benefit-driven tone.`;
+            const systemPrompt = `You are a creative marketing expert. Generate high-impact, engaging marketing content for a mobile application in the specified category. Use a confident and benefit-driven tone. Format the output clearly using **bold text** and line breaks, suitable for direct copy-pasting.`;
             
             const userQuery = `Write ${contentType} for a new, highly-rated app in the "${category}" category. Focus on unique user benefits and encourage high engagement.`;
 
@@ -355,10 +424,11 @@
                 const result = await response.json();
                 const generatedText = result.candidates?.[0]?.content?.parts?.[0]?.text || "Error: Could not retrieve creative content from the API. Check the console for details.";
                 
-                resultElement.textContent = generatedText;
+                // Use innerHTML and convert Markdown for rich display
+                resultElement.innerHTML = markdownToHtml(generatedText);
 
             } catch (error) {
-                resultElement.textContent = `API Error: Failed to generate creative content. Details: ${error.message}`;
+                resultElement.innerHTML = markdownToHtml(`API Error: Failed to generate creative content. Details: **${error.message}**`);
                 console.error("Gemini API Error:", error);
             } finally {
                 setLoader('creative', false);

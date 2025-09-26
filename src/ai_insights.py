@@ -9,11 +9,11 @@ from typing import List
 COMBINED_FILE = 'data/processed/apps_combined.csv'
 INSIGHTS_FILE = 'reports/insights.json'
 
+
 GEMINI_API_KEY = 'AIzaSyDNp9LU-lcyUg8ry_ZjldW07KVkmEngIKM' 
 
 
 client = genai.Client(api_key=GEMINI_API_KEY) 
-
 
 
 class Recommendation(BaseModel):
@@ -32,63 +32,94 @@ class MarketInsight(BaseModel):
 
 
 class InsightsReport(BaseModel):
-    """The full report structure."""
-    summary: str = Field(..., description="An executive summary of all key findings for the VP of Marketing.")
+    """The final structured report containing multiple market intelligence insights."""
+    report_summary: str = Field(..., description="An executive summary of the most critical findings and market trends.")
+    key_metrics_snapshot: str = Field(..., description="A short summary of the key aggregated metrics from the dataset (e.g., 'Average rating is 4.3, 75% of top apps are free, etc.').")
     insights: List[MarketInsight]
 
-# --- LLM INSIGHTS GENERATION ---
+def prepare_data_summary(df: pd.DataFrame) -> str:
+    """Generates a text summary of the DataFrame to feed into the LLM."""
+    
+    # Analyze key categories and their performance
+    category_summary = df.groupby('Category').agg(
+        Total_Installs=('Installs', 'sum'),
+        Avg_Rating=('Rating', 'mean'),
+        Count=('Name', 'count')
+    ).sort_values(by='Total_Installs', ascending=False).head(5).reset_index()
+    
+    # Analyze review polarity
+    polarity_summary = df.groupby('Category')['Avg_Sentiment_Polarity'].mean().sort_values(ascending=False).head(5).reset_index()
+    
+    # App type distribution
+    type_distribution = df['Type'].value_counts(normalize=True).mul(100).to_dict()
+    
+    # Price and rating correlation (simple check)
+    paid_avg_rating = df[df['Type'] == 'Paid']['Rating'].mean()
+    free_avg_rating = df[df['Type'] == 'Free']['Rating'].mean()
+    
+    # Create the detailed prompt data
+    data_summary = f"""
+    --- DATA SNAPSHOT ---
+    Total Apps Analyzed: {len(df)}
+    Data Sources: {', '.join(df['Source'].unique())}
+    
+    --- CATEGORY PERFORMANCE (Top 5 by Installs) ---
+    {category_summary.to_string(index=False)}
+
+    --- AVERAGE SENTIMENT POLARITY (Top 5 Categories) ---
+    Note: Values closer to 1.0 are positive, -1.0 are negative.
+    {polarity_summary.to_string(index=False)}
+    
+    --- APP TYPE DISTRIBUTION ---
+    Free Apps: {type_distribution.get('Free', 0):.2f}%
+    Paid Apps: {type_distribution.get('Paid', 0):.2f}%
+
+    --- RATING COMPARISON ---
+    Average Rating (Paid): {paid_avg_rating:.2f}
+    Average Rating (Free): {free_avg_rating:.2f}
+    """
+    
+    return data_summary
 
 def generate_insights(df: pd.DataFrame) -> dict:
     """
     Generates structured market intelligence insights using the Gemini API.
     """
-    print("-> Generating AI-powered market intelligence insights...")
-
-    # 1. Prepare data summary with statistical validation
+    data_summary = prepare_data_summary(df)
     
-    df['Installs'] = pd.to_numeric(df['Installs'], errors='coerce').fillna(0)
+    system_prompt = """
+    You are a world-class Market Intelligence Analyst. Your task is to analyze the provided raw data summary
+    of a combined Google Play and Mock App Store dataset. Based strictly on the data provided,
+    generate a detailed, structured Insights Report.
 
-    top_categories = df.groupby('Category')['Installs'].sum().nlargest(5)
-    avg_rating_by_type = df.groupby('Type')['Rating'].mean()
+    The report MUST contain:
+    1. An executive summary.
+    2. A snapshot of key metrics.
+    3. At least 3 unique, actionable Market Insights (MI).
     
-    install_median = df['Installs'].median()
-    df['Install_Segment'] = np.where(df['Installs'] > install_median, 'High_Install', 'Low_Install')
+    Each Market Insight must include:
+    - A specific finding directly supported by the data.
+    - A confidence score (0.0 to 1.0) reflecting the statistical clarity of the finding.
+    - 2-3 concrete, prioritized recommendations for product strategy or marketing.
     
-    # Handle NaN in Avg_Sentiment_Polarity before grouping
-    df_temp = df.dropna(subset=['Avg_Sentiment_Polarity'])
-    avg_sentiment_by_segment = df_temp.groupby('Install_Segment')['Avg_Sentiment_Polarity'].mean()
-
-    # Calculate correlation, handling NaNs
-    rating_review_corr = df['Rating'].corr(df['Review_Count'])
-
-    data_summary = f"""
-    Overall Market Data Snapshot (Google Play + Mock App Store):
-    - Total App Records: {len(df)}
-    - Top 5 Categories by Total Installs:\n{top_categories.to_string()}
-    - Average Rating (Free vs. Paid):\n{avg_rating_by_type.to_string()}
-    - **Key User Experience Metric**: Average Sentiment Polarity (0 to 1, higher is better):
-        - High_Install Apps: {avg_sentiment_by_segment.get('High_Install', 'N/A'):.3f}
-        - Low_Install Apps: {avg_sentiment_by_segment.get('Low_Install', 'N/A'):.3f}
-    - Key Stat: Correlation between App Rating and Review_Count: {rating_review_corr:.3f}
+    Focus areas for insights should include:
+    - The correlation between Install volume and Sentiment/Rating.
+    - Strategic recommendations for 'Paid' vs 'Free' apps.
+    - Opportunities in top/underperforming categories.
     """
+
+    user_prompt = f"""
+    Please generate the structured Market Insights Report based on the following data snapshot:
     
-    # 2. Define the prompt
-    prompt = f"""
-    You are an expert Applied AI Engineer building a market intelligence report for executive leadership.
-    Analyze the following market data summary to generate 3 to 5 highly actionable, structured market insights.
-    
-    Focus your analysis on:
-    1. **Growth Opportunities**: Which categories or segments (e.g., Free vs. Paid) show the highest potential for growth.
-    2. **Retention/Quality**: Use the Avg Sentiment Polarity to identify quality gaps or strong user loyalty.
-    3. **Strategy**: Recommend specific actions (e.g., pricing shift, quality focus) based on the findings.
-    
-    DATA SUMMARY:
     {data_summary}
-    
-    Crucially, assign a **confidence_score** (0.0 to 1.0) for each insight based on the strength of the statistical support provided in the summary. Your analysis must be entirely driven by the provided summary statistics.
-    
-    Your output MUST be a single JSON object that conforms strictly to the provided Pydantic schema for InsightsReport.
     """
+    
+    prompt = [
+        {"role": "user", "parts": [{"text": user_prompt}]}
+    ]
+    
+    print("-> Calling Gemini API to generate structured market insights...")
+    print(f"System Prompt Size: {len(system_prompt)} characters.")
     
     # 3. Call the Gemini API with structured output
     try:
@@ -98,12 +129,15 @@ def generate_insights(df: pd.DataFrame) -> dict:
             config=types.GenerateContentConfig(
                 response_mime_type="application/json",
                 response_schema=InsightsReport,
+                system_instruction=system_prompt,
             ),
         )
         
         insights_data = json.loads(response.text)
         
         # 4. Save the deliverable
+        # Ensure output directory exists before saving (though data_pipeline already did this)
+        os.makedirs(os.path.dirname(INSIGHTS_FILE), exist_ok=True)
         with open(INSIGHTS_FILE, 'w') as f:
             json.dump(insights_data, f, indent=4)
             
@@ -111,16 +145,19 @@ def generate_insights(df: pd.DataFrame) -> dict:
         return insights_data
 
     except Exception as e:
-        print(f"\nCRITICAL ERROR: An error occurred during LLM generation: {e}")
+        print(f"\nCRITICAL ERROR: An error occurred during LLM generation. Please check your API key and network connection. Error: {e}")
         return {"error": "LLM generation failed", "details": str(e)}
 
 
 if __name__ == '__main__':
     try:
+        # Added os import here since it was missing but used in generate_insights
+        import os 
         combined_data = pd.read_csv(COMBINED_FILE, dtype={'Installs': 'Int64'})
         generate_insights(combined_data)
         
     except FileNotFoundError as e:
-        print(f"\nCRITICAL ERROR: The combined data file was not found. Please ensure you ran 'data_pipeline.py' successfully first to create '{COMBINED_FILE}'.\nDetails: {e}")
-    except genai.errors.APIError as e:
-        print(f"\nCRITICAL ERROR: Gemini API call failed. Check your GEMINI_API_KEY configuration. Details: {e}")
+        print(f"\nCRITICAL ERROR: The combined data file was not found. Please ensure you ran 'data_pipeline.py' successfully first to create '{COMBINED_FILE}'.")
+        print(f"Details: {e}")
+    except Exception as e:
+        print(f"\nCRITICAL ERROR: An unexpected error occurred in the main script flow: {e}")

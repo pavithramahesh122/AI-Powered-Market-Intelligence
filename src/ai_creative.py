@@ -1,5 +1,6 @@
 import pandas as pd
 import json
+import time 
 from google import genai
 from google.genai import types
 from pydantic import BaseModel, Field
@@ -9,8 +10,12 @@ import os
 # --- CONFIGURATION ---
 D2C_PROCESSED_FILE = 'data/processed/d2c_campaigns_processed.csv'
 CREATIVE_OUTPUT_FILE = 'reports/d2c_creative_output.json'
-# NOTE: This client automatically looks for the GEMINI_API_KEY environment variable.
-client = genai.Client()
+
+# --- API KEY ---
+GEMINI_API_KEY = 'AIzaSyDNp9LU-lcyUg8ry_ZjldW07KVkmEngIKM' 
+
+# Initialize the client, passing the API key explicitly
+client = genai.Client(api_key=GEMINI_API_KEY)
 # --- END CONFIGURATION ---
 
 # --- PYDANTIC SCHEMA FOR STRUCTURED CREATIVE OUTPUT ---
@@ -28,18 +33,28 @@ class D2CCreativeReport(BaseModel):
     focus_summary: str = Field(..., description="A summary of the core metrics guiding the creative generation (e.g., best performing platform, top SEO keyword).")
     creative_assets: List[CreativeOutput]
 
-
 # --- LLM CREATIVE GENERATION ---
+MAX_LLM_RETRIES = 3 
 
 def get_d2c_analysis_summary(df_processed: pd.DataFrame) -> dict:
     """Calculates the necessary aggregated metrics for the LLM prompt."""
     
+    # CRITICAL CHECK: Ensure 'Platform' exists before proceeding.
+    if 'Platform' not in df_processed.columns:
+        # This should no longer happen after the fix in metrics_analysis.py
+        raise KeyError(
+            f"The processed data is missing the 'Platform' column. "
+            f"Current columns are: {list(df_processed.columns)}. "
+            f"Rerun metrics_analysis.py to rename 'channel' to 'Platform'."
+        )
+        
     # 1. Funnel Insights
+    # FIX: Correctly use nlargest(n, columns) to find the top 3 platforms by Avg_ROAS.
     platform_summary = df_processed.groupby('Platform').agg(
         Avg_CAC=('CAC_USD', 'mean'),
         Avg_ROAS=('ROAS', 'mean'),
         Total_Spend=('Ad_Spend_USD', 'sum')
-    ).sort_values(by='Avg_ROAS', ascending=False).nlargest(3).round(2).reset_index()
+    ).nlargest(3, 'Avg_ROAS').round(2).reset_index()
     
     # 2. SEO Insights (Find the highest potential keyword)
     df_processed['SEO_Potential_Score'] = df_processed['SEO_Search_Volume'] / df_processed['SEO_Difficulty']
@@ -57,7 +72,8 @@ def get_d2c_analysis_summary(df_processed: pd.DataFrame) -> dict:
 
 def generate_creative_outputs(df_processed: pd.DataFrame) -> dict:
     """
-    Generates structured D2C creative assets using the Gemini API based on metrics.
+    Generates structured D2C creative assets using the Gemini API based on metrics,
+    with validation and retry logic.
     """
     print("-> Generating AI-powered D2C Creative Outputs...")
 
@@ -86,38 +102,65 @@ def generate_creative_outputs(df_processed: pd.DataFrame) -> dict:
     Your output MUST be a single JSON object that conforms strictly to the provided Pydantic schema for D2CCreativeReport.
     """
     
-    # 3. Call the Gemini API with structured output
-    try:
-        response = client.models.generate_content(
-            model='gemini-2.5-flash',
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                response_mime_type="application/json",
-                response_schema=D2CCreativeReport,
-            ),
-        )
-        
-        creative_data = json.loads(response.text)
-        
-        # Ensure output directory exists and save the deliverable
-        os.makedirs(os.path.dirname(CREATIVE_OUTPUT_FILE), exist_ok=True)
-        with open(CREATIVE_OUTPUT_FILE, 'w') as f:
-            json.dump(creative_data, f, indent=4)
+    # 3. Call the Gemini API with structured output and retry logic
+    for attempt in range(MAX_LLM_RETRIES):
+        try:
+            print(f"  -> Attempt {attempt + 1}: Calling Gemini API...")
+            response = client.models.generate_content(
+                model='gemini-2.5-flash',
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    response_schema=D2CCreativeReport,
+                ),
+            )
             
-        print(f"\nDELIVERABLE 5 (Part 3/3): Saved D2C Creative Outputs to {CREATIVE_OUTPUT_FILE}")
-        return creative_data
+            creative_data = json.loads(response.text)
+            
+            if not creative_data.get('focus_summary') or not creative_data.get('creative_assets'):
+                raise ValueError("JSON is valid but missing required 'focus_summary' or 'creative_assets' keys.")
+            
+            # 4. Save the deliverable (only if successful)
+            os.makedirs(os.path.dirname(CREATIVE_OUTPUT_FILE), exist_ok=True)
+            with open(CREATIVE_OUTPUT_FILE, 'w') as f:
+                json.dump(creative_data, f, indent=4)
+                
+            print(f"\nDELIVERABLE 5 (Part 3/3): Saved D2C Creative Outputs to {CREATIVE_OUTPUT_FILE}")
+            return creative_data
 
-    except Exception as e:
-        print(f"An error occurred during LLM generation: {e}")
-        return {"error": "LLM generation failed", "details": str(e)}
+        except json.JSONDecodeError:
+            print(f"  -> WARNING: LLM returned malformed JSON on attempt {attempt + 1}. Retrying...")
+            time.sleep(2 ** attempt) 
+        except ValueError as e:
+            print(f"  -> WARNING: LLM returned structurally invalid content on attempt {attempt + 1}: {e}. Retrying...")
+            time.sleep(2 ** attempt)
+        except genai.errors.APIError as e:
+            error_message = str(e)
+            if "API key not valid" in error_message or "INVALID_ARGUMENT" in error_message:
+                print(f"\nCRITICAL ERROR: Invalid API key. Please check the 'GEMINI_API_KEY' variable in this script.")
+                return {"error": "API Key Invalid"}
+            
+            print(f"  -> WARNING: Gemini API error on attempt {attempt + 1}: {e}. Retrying...")
+            time.sleep(2 ** attempt)
+        except Exception as e:
+            print(f"  -> WARNING: Unexpected error on attempt {attempt + 1}: {e}. Retrying...")
+            time.sleep(2 ** attempt)
+            
+    print(f"\nCRITICAL ERROR: Failed to get valid, structured creatives from LLM after {MAX_LLM_RETRIES} attempts.")
+    return {"error": "LLM generation failed permanently", "details": "Max retries exceeded."}
 
 
 if __name__ == '__main__':
     try:
+        # Load the processed file
         df_processed = pd.read_csv(D2C_PROCESSED_FILE)
+        
+        # Run the generation process
         generate_creative_outputs(df_processed)
         
     except FileNotFoundError as e:
         print(f"\nCRITICAL ERROR: D2C data not processed. Please run the following scripts first:\n1. d2c_data_generator.py\n2. metrics_analysis.py\nDetails: {e}")
-    except genai.errors.APIError as e:
-        print(f"\nCRITICAL ERROR: Gemini API call failed. Check your GEMINI_API_KEY environment variable. Details: {e}")
+    except KeyError as e:
+        print(f"\nCRITICAL DATA ERROR: {e}")
+    except Exception as e:
+        print(f"An unexpected error occurred: {e}")
