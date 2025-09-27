@@ -4,28 +4,26 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AI Market Intelligence Query Interface</title>
-    <!-- Load Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        /* Custom scrollbar styling for better aesthetics */
+        
         ::-webkit-scrollbar {
             width: 8px;
         }
         ::-webkit-scrollbar-thumb {
-            background: #4B5563; /* Gray-600 */
+            background: #4B5563; 
             border-radius: 4px;
         }
         ::-webkit-scrollbar-track {
-            background: #1F2937; /* Gray-800 */
+            background: #1F2937; 
         }
         
         body {
             font-family: 'Inter', sans-serif;
         }
-        /* Style for the loading spinner */
         .loader {
             border: 4px solid #f3f3f3;
-            border-top: 4px solid #3B82F6; /* Blue-500 */
+            border-top: 4px solid #3B82F6; 
             border-radius: 50%;
             width: 30px;
             height: 30px;
@@ -35,7 +33,7 @@
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
         }
-        /* Custom list style for rendered Markdown */
+
         .result-content ul {
             margin: 0.5rem 0;
             padding-left: 1.5rem;
@@ -55,7 +53,6 @@
             <p class="text-gray-400 mt-2">Interact with your generated report data and create market assets.</p>
         </header>
 
-        <!-- Tool Selection Tabs -->
         <div class="flex space-x-2 bg-gray-800 p-1 rounded-lg shadow-xl">
             <button id="tab-query" onclick="showPanel('query')" class="flex-1 py-3 text-sm font-medium rounded-md transition-colors bg-blue-500 text-white shadow-lg">
                 Query Insights Report
@@ -65,20 +62,16 @@
             </button>
         </div>
 
-        <!-- Global JSON Data Storage -->
         <script>
-            let insightsJsonData = null; // Data will be loaded via file upload
+            let insightsJsonData = null; 
         </script>
 
-        <!-- 1. AI Insight Query Panel -->
         <div id="panel-query" class="panel space-y-6">
             <h2 class="text-2xl font-semibold border-l-4 border-blue-500 pl-3">Ask about the Report</h2>
             
-            <!-- File Upload Component -->
             <div id="data-status-container" class="p-4 rounded-lg border border-gray-600 bg-gray-800">
                 <p class="text-sm font-medium text-blue-400 mb-2">Report Data Status:</p>
                 <div class="flex items-center space-x-3 flex-wrap">
-                    <!-- Hidden file input triggered by the button -->
                     <input type="file" id="json-file-input" accept=".json" class="hidden" onchange="handleFileUpload(event)">
                     
                     <button onclick="document.getElementById('json-file-input').click()" id="upload-button"
@@ -88,8 +81,6 @@
                     <span id="file-status" class="text-yellow-400 my-1">Awaiting file upload...</span>
                 </div>
             </div>
-            <!-- End File Upload Component -->
-
             <p class="text-gray-400">Ask the AI a specific question based on the loaded insights.</p>
 
             <div class="flex flex-col sm:flex-row space-y-4 sm:space-y-0 sm:space-x-4">
@@ -103,12 +94,10 @@
 
             <div id="query-result-container" class="bg-gray-800 p-5 rounded-lg border border-gray-700 shadow-inner">
                 <h3 class="text-lg font-medium text-blue-400 mb-2">AI Response:</h3>
-                <!-- Changed to a <div> to properly render block-level HTML elements from Markdown -->
                 <div id="query-result" class="text-gray-300 result-content space-y-3">The AI will analyze the report JSON and provide the answer here.</div>
             </div>
         </div>
 
-        <!-- 2. AI Creative Generator Panel -->
         <div id="panel-creative" class="panel space-y-6 hidden">
             <h2 class="text-2xl font-semibold border-l-4 border-blue-500 pl-3">Generate Creative Marketing Copy</h2>
             <p class="text-gray-400">Generate a tweet or ad copy for a product in a specific market category.</p>
@@ -142,7 +131,6 @@
 
             <div id="creative-result-container" class="bg-gray-800 p-5 rounded-lg border border-gray-700 shadow-inner">
                 <h3 class="text-lg font-medium text-green-400 mb-2">Generated Content:</h3>
-                <!-- Changed to a <div> to properly render block-level HTML elements from Markdown -->
                 <div id="creative-result" class="text-gray-300 result-content space-y-3">The AI will generate marketing copy based on your selection here.</div>
             </div>
         </div>
@@ -150,41 +138,37 @@
     </div>
     
     <script>
-        // --- Configuration ---
-        // Updated model name for better performance and compliance with best practices
+        // Configuration 
+
         const MODEL_NAME = 'gemini-2.5-flash-preview-05-20';
         const API_URL_BASE = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent?key=`;
-        const apiKey = ""; // Canvas will provide this at runtime
+        const apiKey = "AIzaSyDNp9LU-lcyUg8ry_ZjldW07KVkmEngIKM"; 
 
-        // --- Utility Functions ---
+        //  Utility Functions 
 
-        /**
-         * Converts basic Markdown (headings, bold, lists, paragraphs) to HTML.
-         */
+
         function markdownToHtml(markdown) {
             let html = markdown;
 
-            // 1. Bold/Strong
+
             html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
             
             // 2. Headings (H2 and H3 with Tailwind classes)
-            // Note: Using H3 and H4 for visual hierarchy within the result container
+
             html = html.replace(/^### (.*$)/gim, '<h4 class="text-xl font-semibold mt-4 mb-2 text-blue-300">$1</h4>');
             html = html.replace(/^## (.*$)/gim, '<h3 class="text-lg font-bold mt-4 mb-2 text-blue-400">$1</h3>');
 
-            // 3. Lists (Simple unordered list conversion)
-            // This captures consecutive lines starting with '- ' and wraps them in <ul>.
+            // 3. Lists
             const listRegex = /(\n|^)(- .*(\n- .*)*)/g;
             html = html.replace(listRegex, (match, p1, p2) => {
-                // p2 contains the list items, potentially multiline
+      
                 let items = p2.trim().split('\n- ').map(item => item.replace(/^- /, '')).join('</li><li>');
-                // Ensure the list items are wrapped correctly
+
                 return `${p1}<ul class="list-disc list-inside ml-4 space-y-1">${items ? `<li>${items}</li>` : ''}</ul>`;
             });
             
             // 4. Paragraphs and Line Breaks
-            // Split by double newlines to create paragraph blocks.
-            // If the block is already a heading or list, don't wrap it.
+
             html = html.split('\n\n').map(p => {
                 const trimmedP = p.trim();
                 // Check if it's already an HTML block element (Heading or List)
@@ -284,7 +268,7 @@
             }
         }
 
-        // --- File Upload Handler ---
+        // File Upload Handler 
         function updateFileStatus(message, isSuccess = false) {
             const statusElement = document.getElementById('file-status');
             statusElement.textContent = message;
@@ -334,7 +318,7 @@
             reader.readAsText(file);
         }
 
-        // --- Core Application Logic ---
+        //  Core Application Logic 
 
         // 1. Insight Query Handler
         async function handleInsightQuery() {
@@ -382,8 +366,16 @@
                 });
                 
                 const result = await response.json();
-                const generatedText = result.candidates?.[0]?.content?.parts?.[0]?.text || "Error: Could not retrieve a response from the API. Check the console for details.";
                 
+                //  LLM Response Robustness Check 
+                const generatedText = result.candidates?.[0]?.content?.parts?.[0]?.text;
+
+                if (!generatedText) {
+                    const errorJson = JSON.stringify(result, null, 2);
+                    throw new Error(`Model response missing expected content structure. Full response: ${errorJson}`);
+                }
+                //  END LLM Response Robustness Check 
+
                 // Use innerHTML and convert Markdown for rich display
                 resultElement.innerHTML = markdownToHtml(generatedText);
 
@@ -422,7 +414,15 @@
                 });
                 
                 const result = await response.json();
-                const generatedText = result.candidates?.[0]?.content?.parts?.[0]?.text || "Error: Could not retrieve creative content from the API. Check the console for details.";
+                
+                // LLM Response Robustness Check 
+                const generatedText = result.candidates?.[0]?.content?.parts?.[0]?.text;
+
+                if (!generatedText) {
+                    const errorJson = JSON.stringify(result, null, 2);
+                    throw new Error(`Model response missing expected content structure. Full response: ${errorJson}`);
+                }
+                // END LLM Response Robustness Check 
                 
                 // Use innerHTML and convert Markdown for rich display
                 resultElement.innerHTML = markdownToHtml(generatedText);
@@ -435,7 +435,7 @@
             }
         }
         
-        // --- Initialization ---
+        //  Initialization
         document.addEventListener('DOMContentLoaded', () => {
             showPanel('query'); // Default view
         });

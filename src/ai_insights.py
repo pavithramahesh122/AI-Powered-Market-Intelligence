@@ -1,15 +1,21 @@
 import pandas as pd
 import numpy as np
 import json
+import time # Added for exponential backoff
 from google import genai
 from google.genai import types
 from pydantic import BaseModel, Field
 from typing import List
+import os
 
 COMBINED_FILE = 'data/processed/apps_combined.csv'
 INSIGHTS_FILE = 'reports/insights.json'
 
 
+# Define max retries for the LLM call
+MAX_LLM_RETRIES = 3
+
+# Using a placeholder key from the provided code block
 GEMINI_API_KEY = 'AIzaSyDNp9LU-lcyUg8ry_ZjldW07KVkmEngIKM' 
 
 
@@ -40,20 +46,20 @@ class InsightsReport(BaseModel):
 def prepare_data_summary(df: pd.DataFrame) -> str:
     """Generates a text summary of the DataFrame to feed into the LLM."""
     
-    # Analyze key categories and their performance
+    # 1. Analyze key categories and their performance
     category_summary = df.groupby('Category').agg(
         Total_Installs=('Installs', 'sum'),
         Avg_Rating=('Rating', 'mean'),
         Count=('Name', 'count')
-    ).sort_values(by='Total_Installs', ascending=False).head(5).reset_index()
+    ).sort_values(by='Total_Installs', ascending=False).head(5).round(2).reset_index()
     
-    # Analyze review polarity
-    polarity_summary = df.groupby('Category')['Avg_Sentiment_Polarity'].mean().sort_values(ascending=False).head(5).reset_index()
+    # 2. Analyze review polarity
+    polarity_summary = df.groupby('Category')['Avg_Sentiment_Polarity'].mean().sort_values(ascending=False).head(5).round(4).reset_index()
     
-    # App type distribution
+    # 3. App type distribution
     type_distribution = df['Type'].value_counts(normalize=True).mul(100).to_dict()
     
-    # Price and rating correlation (simple check)
+    # 4. Price and rating correlation (simple check)
     paid_avg_rating = df[df['Type'] == 'Paid']['Rating'].mean()
     free_avg_rating = df[df['Type'] == 'Free']['Rating'].mean()
     
@@ -83,7 +89,8 @@ def prepare_data_summary(df: pd.DataFrame) -> str:
 
 def generate_insights(df: pd.DataFrame) -> dict:
     """
-    Generates structured market intelligence insights using the Gemini API.
+    Generates structured market intelligence insights using the Gemini API,
+    with robust retry logic for malformed JSON output.
     """
     data_summary = prepare_data_summary(df)
     
@@ -119,39 +126,62 @@ def generate_insights(df: pd.DataFrame) -> dict:
     ]
     
     print("-> Calling Gemini API to generate structured market insights...")
-    print(f"System Prompt Size: {len(system_prompt)} characters.")
     
-    # 3. Call the Gemini API with structured output
-    try:
-        response = client.models.generate_content(
-            model='gemini-2.5-flash',
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                response_mime_type="application/json",
-                response_schema=InsightsReport,
-                system_instruction=system_prompt,
-            ),
-        )
-        
-        insights_data = json.loads(response.text)
-        
-        # 4. Save the deliverable
-        # Ensure output directory exists before saving (though data_pipeline already did this)
-        os.makedirs(os.path.dirname(INSIGHTS_FILE), exist_ok=True)
-        with open(INSIGHTS_FILE, 'w') as f:
-            json.dump(insights_data, f, indent=4)
+    # IMPLEMENTATION OF ROBUST RETRY LOOP
+    for attempt in range(MAX_LLM_RETRIES):
+        try:
+            # API Call
+            response = client.models.generate_content(
+                model='gemini-2.5-flash',
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    response_schema=InsightsReport,
+                    system_instruction=system_prompt,
+                ),
+            )
             
-        print(f"\nDELIVERABLE 2: Saved structured insights JSON to {INSIGHTS_FILE}")
-        return insights_data
+            # CRITICAL FIX: Attempt to decode the JSON. If the model fails, this raises json.JSONDecodeError.
+            insights_data = json.loads(response.text)
+            
+            # If successful, save the deliverable and break the loop
+            os.makedirs(os.path.dirname(INSIGHTS_FILE), exist_ok=True)
+            with open(INSIGHTS_FILE, 'w') as f:
+                json.dump(insights_data, f, indent=4)
+                
+            print(f"\nDELIVERABLE 2: Saved structured insights JSON to {INSIGHTS_FILE}")
+            return insights_data
 
-    except Exception as e:
-        print(f"\nCRITICAL ERROR: An error occurred during LLM generation. Please check your API key and network connection. Error: {e}")
-        return {"error": "LLM generation failed", "details": str(e)}
+        except json.JSONDecodeError as e:
+            print(f"  -> WARNING: JSON Decode Error on attempt {attempt + 1}. Model returned malformed JSON. Retrying...")
+            if attempt == MAX_LLM_RETRIES - 1:
+                break # Exit after the last failed attempt
+            time.sleep(2 ** attempt) # Exponential backoff
+        
+        except genai.errors.APIError as e:
+            error_message = str(e)
+            if "API key not valid" in error_message or "INVALID_ARGUMENT" in error_message:
+                print(f"\nCRITICAL ERROR: Invalid API key or configuration error. Please check the 'GEMINI_API_KEY' variable.")
+                return {"error": "API Key Invalid"}
+
+            print(f"  -> WARNING: Gemini API error on attempt {attempt + 1}: {e}. Retrying...")
+            if attempt == MAX_LLM_RETRIES - 1:
+                break 
+            time.sleep(2 ** attempt)
+
+        except Exception as e:
+            print(f"  -> WARNING: Unexpected error on attempt {attempt + 1}: {e}. Retrying...")
+            if attempt == MAX_LLM_RETRIES - 1:
+                break 
+            time.sleep(2 ** attempt)
+            
+    # If the loop completes without returning, it means all retries failed.
+    print(f"\nCRITICAL ERROR: Failed to get valid, structured insights from LLM after {MAX_LLM_RETRIES} attempts.")
+    return {"error": "LLM generation failed permanently", "details": "Max retries exceeded or malformed JSON persisted."}
 
 
 if __name__ == '__main__':
     try:
-        import os 
         combined_data = pd.read_csv(COMBINED_FILE, dtype={'Installs': 'Int64'})
         generate_insights(combined_data)
         

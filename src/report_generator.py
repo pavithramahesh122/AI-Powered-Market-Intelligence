@@ -4,7 +4,7 @@ import pandas as pd
 from datetime import datetime
 
 INSIGHTS_FILE = 'reports/insights.json'
-REPORT_FILE = 'reports/executive_report.md' # Renamed output file to match your input
+REPORT_FILE = 'reports/executive_report.md' 
 COMBINED_DATA_FILE = 'data/processed/apps_combined.csv'
 
 

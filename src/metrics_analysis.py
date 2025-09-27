@@ -1,8 +1,10 @@
 import pandas as pd
 import os
+import numpy as np
 
 # CONFIGURATION 
-RAW_D2C_FILE = 'data/d2c_campaigns_raw.csv'
+# FIX 1: Corrected path to match output from d2c_data_generator.py
+RAW_D2C_FILE = 'data/d2c_campaigns_raw.csv' 
 PROCESSED_D2C_FILE = 'data/processed/d2c_campaigns_processed.csv'
 
 
@@ -19,25 +21,28 @@ def analyze_d2c_metrics():
         print(f"CRITICAL ERROR: Raw D2C data not found at {RAW_D2C_FILE}. Ensure you have provided or generated this file.")
         return
 
-    # Data Cleaning and Preparation (CRITICAL RENAMING FIX) 
+    # Data Cleaning and Preparation 
     
-    # Check if 'channel' exists before renaming
-    if 'channel' in df.columns:
+    # FIX 2: Check for 'Campaign_Platform' (from d2c_data_generator.py) or 'channel' and standardize to 'Platform'
+    if 'Campaign_Platform' in df.columns:
+        df.rename(columns={'Campaign_Platform': 'Platform'}, inplace=True)
+        print("  -> SUCCESS: Renamed 'Campaign_Platform' column to 'Platform'.")
+    elif 'channel' in df.columns: 
         df.rename(columns={'channel': 'Platform'}, inplace=True)
         print("  -> SUCCESS: Renamed 'channel' column to 'Platform'.")
     
-    # Map other columns found in your file to the standardized names the script expects.
+    # Defensive renames for common column naming conventions
     df.rename(columns={
         'spend_usd': 'Ad_Spend_USD',
         'revenue_usd': 'Revenue_USD',
         'installs': 'Conversions',
-        # 'channel' is now handled above
         'monthly_search_volume': 'SEO_Search_Volume',
-        'seo_category': 'SEO_Keyword',
-        'avg_position': 'SEO_Difficulty' # Assuming avg_position is a proxy for difficulty or should be treated as such
+        'search_difficulty': 'SEO_Difficulty',
+        'target_keyword': 'SEO_Keyword'
     }, inplace=True)
 
-    # Check for required columns after renaming
+
+    # Validation (Ensuring required columns for calculation exist after renaming)
     required_cols = ['Ad_Spend_USD', 'Conversions', 'Revenue_USD', 'Platform', 'SEO_Search_Volume', 'SEO_Difficulty', 'SEO_Keyword']
     missing_cols = [col for col in required_cols if col not in df.columns]
 
@@ -50,26 +55,26 @@ def analyze_d2c_metrics():
 
     # 1. Calculate Cost per Acquisition (CPA or CAC)
     df_valid = df[df['Conversions'] > 0].copy()
+    # Handle NaNs and 0s in Ad_Spend_USD before calculation for robustness
+    df_valid['Ad_Spend_USD'] = df_valid['Ad_Spend_USD'].fillna(0)
     df_valid['CAC_USD'] = df_valid['Ad_Spend_USD'] / df_valid['Conversions']
 
     # 2. Calculate Return on Ad Spend (ROAS)
     df_valid['ROAS'] = df_valid['Revenue_USD'] / df_valid['Ad_Spend_USD']
+    # Handle division by zero (0 Ad Spend) explicitly
     df_valid.loc[df_valid['Ad_Spend_USD'] == 0, 'ROAS'] = 0.0
 
     # 3. Final cleanup and save
     df_merged = df.merge(df_valid[['CAC_USD', 'ROAS']], left_index=True, right_index=True, how='left')
     
-    # Fill NaN (using loc to avoid FutureWarning)
-    df_merged.loc[df_merged['CAC_USD'].isna(), 'CAC_USD'] = 0
-    df_merged.loc[df_merged['ROAS'].isna(), 'ROAS'] = 0.0
-
+    # Fill NaN for rows that had 0 conversions or 0 spend 
+    df_merged.loc[df_merged['CAC_USD'].isna(), 'CAC_USD'] = 0 
+    df_merged.loc[df_merged['ROAS'].isna(), 'ROAS'] = 0.0 
+    
+    # Ensure output directory exists before saving
     os.makedirs(os.path.dirname(PROCESSED_D2C_FILE), exist_ok=True)
-    
-    # Save the processed data
     df_merged.to_csv(PROCESSED_D2C_FILE, index=False)
-    
-    print(f"\nDELIVERABLE 4 (Part 2/3): Saved processed D2C metrics to {PROCESSED_D2C_FILE}")
-    
+    print(f"-> D2C metrics analysis complete. Saved processed data to {PROCESSED_D2C_FILE}")
     return df_merged
 
 if __name__ == '__main__':

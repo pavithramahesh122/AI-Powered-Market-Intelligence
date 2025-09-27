@@ -1,10 +1,11 @@
 import pandas as pd
 import numpy as np
 import os
+from datetime import datetime
 
-# --- CONFIGURATION ---
-RAW_D2C_FILE = 'data/raw/d2c_campaigns_raw.csv'
-# --- END CONFIGURATION ---
+
+RAW_D2C_FILE = 'data/d2c_campaigns_raw.csv'
+
 
 def generate_mock_d2c_data(num_records: int = 2000):
     """
@@ -24,6 +25,7 @@ def generate_mock_d2c_data(num_records: int = 2000):
     
     data = {
         'Date': pd.to_datetime('2024-01-01') + pd.to_timedelta(np.random.randint(0, 365, num_records), unit='D'),
+        # CRITICAL COLUMN NAME: 'Campaign_Platform' is used here, and 'metrics_analysis.py' must rename it.
         'Campaign_Platform': np.random.choice(platforms, num_records, p=[0.35, 0.40, 0.15, 0.10]),
         'Campaign_Type': np.random.choice(campaign_types, num_records, p=[0.1, 0.5, 0.2, 0.2]),
         'Ad_Spend_USD': np.random.uniform(5.0, 500.0, num_records).round(2),
@@ -41,19 +43,21 @@ def generate_mock_d2c_data(num_records: int = 2000):
     df.loc[df['Campaign_Type'] == 'App Install', 'Revenue_USD'] = 0 # App Installs are not direct revenue campaigns
 
     # 2. Inject Keyword Data (primarily for Google Search campaigns)
-    df['Keyword'] = np.where(
+    # The columns below are required by metrics_analysis.py
+    df['SEO_Keyword'] = np.where(
         df['Campaign_Platform'] == 'Google Search',
-        np.random.choice(keywords, len(df), p=[0.25, 0.15, 0.2, 0.15, 0.1, 0.15]),
-        'N/A'
+        np.random.choice(keywords, len(df)),
+        np.random.choice(keywords, len(df), p=np.repeat(1/len(keywords), len(keywords)))
     )
     
-    # Ensure directory exists
+    # Mock SEO metrics, loosely correlated with the chosen keyword
+    df['SEO_Search_Volume'] = np.random.randint(500, 50000, len(df))
+    df['SEO_Difficulty'] = np.random.uniform(0.5, 5.0, len(df)).round(1)
+
+    # Final Save
     os.makedirs(os.path.dirname(RAW_D2C_FILE), exist_ok=True)
-    
-    # Save the file
     df.to_csv(RAW_D2C_FILE, index=False)
-    
-    print(f"\nDELIVERABLE 4 (Part 1/3): Saved mock D2C raw data to {RAW_D2C_FILE}")
+    print(f"Mock D2C data saved to {RAW_D2C_FILE}")
     
     return df
 

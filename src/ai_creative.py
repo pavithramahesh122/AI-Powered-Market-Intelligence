@@ -6,6 +6,7 @@ from google.genai import types
 from pydantic import BaseModel, Field
 from typing import List
 import os
+import numpy as np
 
 # CONFIGURATION
 D2C_PROCESSED_FILE = 'data/processed/d2c_campaigns_processed.csv'
@@ -39,17 +40,13 @@ MAX_LLM_RETRIES = 3
 def get_d2c_analysis_summary(df_processed: pd.DataFrame) -> dict:
     """Calculates the necessary aggregated metrics for the LLM prompt."""
     
-    # CRITICAL CHECK: Ensure 'Platform' exists before proceeding.
     if 'Platform' not in df_processed.columns:
-        # This should no longer happen after the fix in metrics_analysis.py
         raise KeyError(
             f"The processed data is missing the 'Platform' column. "
-            f"Current columns are: {list(df_processed.columns)}. "
-            f"Rerun metrics_analysis.py to rename 'channel' to 'Platform'."
+            f"Rerun metrics_analysis.py to standardize the platform column."
         )
         
     # 1. Funnel Insights
-    # FIX: Correctly use nlargest(n, columns) to find the top 3 platforms by Avg_ROAS.
     platform_summary = df_processed.groupby('Platform').agg(
         Avg_CAC=('CAC_USD', 'mean'),
         Avg_ROAS=('ROAS', 'mean'),
@@ -57,7 +54,12 @@ def get_d2c_analysis_summary(df_processed: pd.DataFrame) -> dict:
     ).nlargest(3, 'Avg_ROAS').round(2).reset_index()
     
     # 2. SEO Insights (Find the highest potential keyword)
-    df_processed['SEO_Potential_Score'] = df_processed['SEO_Search_Volume'] / df_processed['SEO_Difficulty']
+    df_processed['SEO_Difficulty'] = df_processed['SEO_Difficulty'].fillna(5.0)
+    df_processed['SEO_Search_Volume'] = df_processed['SEO_Search_Volume'].fillna(0)
+    
+    # Avoid division by zero by ensuring difficulty is at least 0.1 for calculation
+    df_processed['SEO_Potential_Score'] = df_processed['SEO_Search_Volume'] / np.maximum(df_processed['SEO_Difficulty'], 0.1)
+    
     best_seo = df_processed.sort_values(by='SEO_Potential_Score', ascending=False).iloc[0]
 
     return {
@@ -79,7 +81,6 @@ def generate_creative_outputs(df_processed: pd.DataFrame) -> dict:
 
     analysis_summary = get_d2c_analysis_summary(df_processed)
     
-    # Identify the best platform and keyword from the summary
     best_platform = analysis_summary['Top_3_Platforms_by_ROAS'][0]['Platform']
     best_roas = analysis_summary['Top_3_Platforms_by_ROAS'][0]['Avg_ROAS']
     best_keyword = analysis_summary['Best_SEO_Keyword']['keyword']
@@ -102,7 +103,7 @@ def generate_creative_outputs(df_processed: pd.DataFrame) -> dict:
     Your output MUST be a single JSON object that conforms strictly to the provided Pydantic schema for D2CCreativeReport.
     """
     
-    # 3. Call the Gemini API with structured output and retry logic
+    # Call the Gemini API with structured output and retry logic
     for attempt in range(MAX_LLM_RETRIES):
         try:
             print(f"  -> Attempt {attempt + 1}: Calling Gemini API...")
@@ -117,15 +118,16 @@ def generate_creative_outputs(df_processed: pd.DataFrame) -> dict:
             
             creative_data = json.loads(response.text)
             
+            # Validation check
             if not creative_data.get('focus_summary') or not creative_data.get('creative_assets'):
                 raise ValueError("JSON is valid but missing required 'focus_summary' or 'creative_assets' keys.")
             
-            # 4. Save the deliverable (only if successful)
+            # Save the deliverable (only if successful)
             os.makedirs(os.path.dirname(CREATIVE_OUTPUT_FILE), exist_ok=True)
             with open(CREATIVE_OUTPUT_FILE, 'w') as f:
                 json.dump(creative_data, f, indent=4)
                 
-            print(f"\nDELIVERABLE 5 (Part 3/3): Saved D2C Creative Outputs to {CREATIVE_OUTPUT_FILE}")
+            print(f"\nDELIVERABLE: Saved D2C Creative Outputs to {CREATIVE_OUTPUT_FILE}")
             return creative_data
 
         except json.JSONDecodeError:
