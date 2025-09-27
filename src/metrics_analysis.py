@@ -1,10 +1,10 @@
 import pandas as pd
 import os
 
-# --- CONFIGURATION ---
+# CONFIGURATION 
 RAW_D2C_FILE = 'data/d2c_campaigns_raw.csv'
 PROCESSED_D2C_FILE = 'data/processed/d2c_campaigns_processed.csv'
-# --- END CONFIGURATION ---
+
 
 def analyze_d2c_metrics():
     """
@@ -19,7 +19,7 @@ def analyze_d2c_metrics():
         print(f"CRITICAL ERROR: Raw D2C data not found at {RAW_D2C_FILE}. Ensure you have provided or generated this file.")
         return
 
-    # --- Data Cleaning and Preparation (CRITICAL RENAMING FIX) ---
+    # Data Cleaning and Preparation (CRITICAL RENAMING FIX) 
     
     # Check if 'channel' exists before renaming
     if 'channel' in df.columns:
@@ -46,7 +46,7 @@ def analyze_d2c_metrics():
         print("Available columns after attempted renaming are:", list(df.columns))
         return
         
-    # --- Metric Calculation ---
+    # Metric Calculation 
 
     # 1. Calculate Cost per Acquisition (CPA or CAC)
     df_valid = df[df['Conversions'] > 0].copy()

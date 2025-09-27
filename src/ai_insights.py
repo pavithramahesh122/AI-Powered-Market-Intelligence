@@ -151,7 +151,6 @@ def generate_insights(df: pd.DataFrame) -> dict:
 
 if __name__ == '__main__':
     try:
-        # Added os import here since it was missing but used in generate_insights
         import os 
         combined_data = pd.read_csv(COMBINED_FILE, dtype={'Installs': 'Int64'})
         generate_insights(combined_data)

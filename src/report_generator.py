@@ -3,18 +3,16 @@ import os
 import pandas as pd
 from datetime import datetime
 
-# --- CONFIGURATION ---
 INSIGHTS_FILE = 'reports/insights.json'
 REPORT_FILE = 'reports/executive_report.md' # Renamed output file to match your input
 COMBINED_DATA_FILE = 'data/processed/apps_combined.csv'
-# --- END CONFIGURATION ---
+
 
 def generate_executive_report():
     """Loads the insights JSON and converts it into a structured Markdown report, including metadata."""
     print("-> Starting Executive Report generation...")
     
     try:
-        # Load the LLM-generated insights
         with open(INSIGHTS_FILE, 'r') as f:
             insights_data = json.load(f)
 
@@ -86,6 +84,5 @@ def generate_executive_report():
     print(f"\nDELIVERABLE 3: Saved Executive Report to {REPORT_FILE}")
 
 if __name__ == '__main__':
-    # Ensure the 'reports' directory exists (This is a great addition!)
     os.makedirs('reports', exist_ok=True)
     generate_executive_report()

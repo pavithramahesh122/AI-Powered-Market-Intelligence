@@ -7,18 +7,18 @@ from pydantic import BaseModel, Field
 from typing import List
 import os
 
-# --- CONFIGURATION ---
+# CONFIGURATION
 D2C_PROCESSED_FILE = 'data/processed/d2c_campaigns_processed.csv'
 CREATIVE_OUTPUT_FILE = 'reports/d2c_creative_output.json'
 
-# --- API KEY ---
+# API KEY 
 GEMINI_API_KEY = 'AIzaSyDNp9LU-lcyUg8ry_ZjldW07KVkmEngIKM' 
 
 # Initialize the client, passing the API key explicitly
 client = genai.Client(api_key=GEMINI_API_KEY)
-# --- END CONFIGURATION ---
 
-# --- PYDANTIC SCHEMA FOR STRUCTURED CREATIVE OUTPUT ---
+
+# PYDANTIC SCHEMA FOR STRUCTURED CREATIVE OUTPUT 
 
 class CreativeOutput(BaseModel):
     """A single AI-generated creative asset."""
@@ -33,7 +33,7 @@ class D2CCreativeReport(BaseModel):
     focus_summary: str = Field(..., description="A summary of the core metrics guiding the creative generation (e.g., best performing platform, top SEO keyword).")
     creative_assets: List[CreativeOutput]
 
-# --- LLM CREATIVE GENERATION ---
+# LLM CREATIVE GENERATION
 MAX_LLM_RETRIES = 3 
 
 def get_d2c_analysis_summary(df_processed: pd.DataFrame) -> dict:

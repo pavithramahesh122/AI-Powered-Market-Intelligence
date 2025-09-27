@@ -11,7 +11,7 @@ REVIEWS_FILE = 'data/googleplaystore_user_reviews.csv'
 COMBINED_FILE = 'data/processed/apps_combined.csv'
 
 # MOCK API CONFIGURATION
-# NOTE: In a real environment, these details would be loaded from a secure config or environment variables.
+
 RAPIDAPI_KEY = '8065b3eb6fmsh9ff6a831c5406d4p1ff81ejsncec291d7a03d' 
 RAPIDAPI_HOST = 'appstore-scrapper-api.p.rapidapi.com'
 RAPIDAPI_URL = f'https://{RAPIDAPI_HOST}/v1/app-store-api/search'
@@ -32,22 +32,17 @@ def load_and_clean_kaggle_data() -> pd.DataFrame:
         print(f"Error: Required file not found. Check if '{KAGGLE_FILE}' is in the 'data/' folder.")
         raise
     
-    # CRITICAL FIX: Drop the known corrupted row (found in many Kaggle versions)
+
     df = df[df['Installs'] != 'Free'].copy()
 
-    # Remove duplicate app entries
     df.drop_duplicates(inplace=True)
 
-    # 1. Clean 'Installs': Remove '+' and ',' and convert to nullable integer type (Int64)
     df['Installs'] = df['Installs'].str.replace('+', '').str.replace(',', '', regex=False).astype('Int64')
 
-    # 2. Clean 'Price': Remove '$' and convert to float
     df['Price'] = df['Price'].str.replace('$', '', regex=False).astype(float)
 
-    # 3. Clean 'Reviews': Convert to integer
     df['Reviews'] = df['Reviews'].astype(int)
 
-    # 4. Clean 'Size' (Convert 'M' and 'K' units to Bytes)
     def size_to_bytes(size):
         if pd.isna(size):
             return np.nan
@@ -56,7 +51,6 @@ def load_and_clean_kaggle_data() -> pd.DataFrame:
             return float(size.replace('M', '')) * (1024 ** 2)
         elif 'K' in size:
             return float(size.replace('K', '')) * 1024
-        # Return NaN for unknown or 'Varies with device' entries
         return np.nan
 
     df['Size_Bytes'] = df['Size'].apply(size_to_bytes)
@@ -67,8 +61,6 @@ def load_and_clean_kaggle_data() -> pd.DataFrame:
     df['Source'] = 'Google Play Store'
     
     print("-> Kaggle data cleaning complete.")
-    # FIX: Include the newly created 'Size_Bytes' column in the returned DataFrame.
-    # It was missing, which caused the KeyError in build_unified_dataset.
     return df[['Name', 'Category', 'Rating', 'Reviews', 'Installs', 'Type', 'Price', 
                'Content Rating', 'Last Updated', 'Android Ver', 'Source', 'Size_Bytes']].copy()
 
@@ -80,17 +72,13 @@ def process_and_merge_reviews(df_google: pd.DataFrame) -> pd.DataFrame:
         df_reviews = pd.read_csv(REVIEWS_FILE)
     except FileNotFoundError:
         print(f"Error: Required file not found. Check if '{REVIEWS_FILE}' is in the 'data/' folder. Skipping sentiment calculation.")
-        # If reviews are missing, proceed without sentiment data
         df_google['Avg_Sentiment_Polarity'] = 0.0
         return df_google
     
     # Calculate average sentiment polarity per app
     df_reviews_avg = df_reviews.groupby('App')['Sentiment_Polarity'].mean().reset_index()
     df_reviews_avg.rename(columns={'App': 'Name', 'Sentiment_Polarity': 'Avg_Sentiment_Polarity'}, inplace=True)
-    
-    # Merge sentiment data back to the main DataFrame (left join keeps all main apps)
     df_merged = pd.merge(df_google, df_reviews_avg, on='Name', how='left')
-    # Fill NaN with neutral sentiment (0) for apps without review data
     df_merged['Avg_Sentiment_Polarity'] = df_merged['Avg_Sentiment_Polarity'].fillna(0) 
     
     print("-> User review processing and merge complete.")
@@ -107,35 +95,29 @@ def fetch_appstore_data(app_names: List[str], use_mock: bool = True) -> pd.DataF
     
     for app_name in app_names:
         
-        # --- API Simulation / Call ---
+
         if use_mock:
-            # Mocked search results structure (first result is the one we want)
             app_details = {
                 "results": [
                     {
                         "Name": app_name,
                         "Category": np.random.choice(['Games', 'Finance', 'Health']),
-                        # FIX: Using global round() function instead of the non-existent .round() method on native float
                         "Rating": round(np.random.uniform(4.0, 5.0), 1),
                         "Reviews": np.random.randint(5000, 500000),
                         "Installs": np.random.randint(100, 50000000),
                         "Type": np.random.choice(['Free', 'Paid'], p=[0.85, 0.15]),
-                        # FIX: Using global round() function
                         "Price": np.random.choice([0.0, round(np.random.uniform(0.99, 9.99), 2)], p=[0.85, 0.15]),
                         "Content Rating": np.random.choice(['Everyone', '9+', '12+']),
                         "Size_Bytes": np.random.randint(15 * (1024**2), 150 * (1024**2)),
                         "Required Android Ver": "iOS 14.0+", # Mock data field name
                         "Last Updated": time.strftime("%B %d, %Y"),
-                        # FIX: Using global round() function
                         "Avg_Sentiment_Polarity": round(np.random.uniform(-0.5, 0.9), 2),
                         "Source": "App Store (Mock)"
                     }
                 ]
             }
         else:
-            # Placeholder for real API Call logic
             try:
-                # In a real pipeline, this would call the search API
                 response = requests.get(RAPIDAPI_URL, headers=HEADERS, params={'query': app_name})
                 response.raise_for_status() 
                 app_details = response.json()
@@ -144,10 +126,7 @@ def fetch_appstore_data(app_names: List[str], use_mock: bool = True) -> pd.DataF
                 continue 
 
         if 'results' in app_details and len(app_details['results']) > 0:
-            # FIX FOR EFFICIENCY: We only use the top result (index 0)
             result = app_details['results'][0]
-
-            # Standardize column names for the combined dataset (API data uses 'Required Android Ver')
             result['Review_Count'] = result.pop('Reviews')
             result['Required_Android_Version'] = result.pop('Required Android Ver')
             result['Last_Updated_Date'] = result.pop('Last Updated')
@@ -193,9 +172,8 @@ def build_unified_dataset(use_mock_api=True) -> pd.DataFrame:
         'Android Ver': 'Required_Android_Version'
     }, inplace=True)
     
-    # Select and ensure consistent columns before concatenating
+ 
     df_google_final = df_google_full[columns_to_keep]
-    # Handle potential empty App Store data if no results were found
     df_appstore_final = df_appstore.reindex(columns=columns_to_keep, fill_value=np.nan)
     
     # Combine the datasets
