@@ -14,7 +14,7 @@ API_CACHE_FILE = 'data/processed/appstore_cache.json' # Cache file for App Store
 
 # MOCK API CONFIGURATION
 # NOTE: The script defaults to MOCK API calls inside fetch_appstore_data()
-RAPIDAPI_KEY = 'YOUR_MOCK_RAPIDAPI_KEY' # Placeholder for real API
+RAPIDAPI_KEY = '8065b3eb6fmsh9ff6a831c5406d4p1ff81ejsncec291d7a03d' 
 RAPIDAPI_HOST = 'appstore-scrapper-api.p.rapidapi.com'
 RAPIDAPI_URL = f'https://{RAPIDAPI_HOST}/v1/app-store-api/search'
 

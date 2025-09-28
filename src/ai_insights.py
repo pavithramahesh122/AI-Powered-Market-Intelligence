@@ -15,7 +15,6 @@ INSIGHTS_FILE = 'reports/insights.json'
 # Define max retries for the LLM call
 MAX_LLM_RETRIES = 3
 
-# Using a placeholder key from the provided code block
 GEMINI_API_KEY = 'AIzaSyDNp9LU-lcyUg8ry_ZjldW07KVkmEngIKM' 
 
 

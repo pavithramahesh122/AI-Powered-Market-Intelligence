@@ -144,7 +144,23 @@
         const API_URL_BASE = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent?key=`;
         const apiKey = "AIzaSyDNp9LU-lcyUg8ry_ZjldW07KVkmEngIKM"; 
 
-        //  Utility Functions 
+        // NEW: Define the expected structured JSON output from the LLM for insights
+        const INSIGHT_RESPONSE_SCHEMA = {
+            type: 'OBJECT',
+            properties: {
+                answer: {
+                    type: 'STRING',
+                    description: 'The final, concise answer to the user\'s question, formatted in markdown with headings and bullet points.'
+                },
+                metadata: {
+                    type: 'STRING',
+                    description: 'A brief note (e.g., "Source: Report Data") or any derived metric, for internal tracking. Can be empty.'
+                }
+            },
+            required: ['answer']
+        };
+
+        //  Utility Functions 
 
 
         function markdownToHtml(markdown) {
@@ -161,7 +177,7 @@
             // 3. Lists
             const listRegex = /(\n|^)(- .*(\n- .*)*)/g;
             html = html.replace(listRegex, (match, p1, p2) => {
-      
+    
                 let items = p2.trim().split('\n- ').map(item => item.replace(/^- /, '')).join('</li><li>');
 
                 return `${p1}<ul class="list-disc list-inside ml-4 space-y-1">${items ? `<li>${items}</li>` : ''}</ul>`;
@@ -318,7 +334,7 @@
             reader.readAsText(file);
         }
 
-        //  Core Application Logic 
+        //  Core Application Logic 
 
         // 1. Insight Query Handler
         async function handleInsightQuery() {
@@ -340,8 +356,8 @@
             // Use stringify to convert the JS object back into a string for the model
             const jsonString = JSON.stringify(insightsJsonData, null, 2);
             
-            // NOTE: System prompt emphasizes reliance only on the provided JSON data.
-            const systemPrompt = "You are a market intelligence analyst. Your task is to use the provided JSON data, which contains key market insights and recommendations, to answer the user's question concisely. Only use information available in the JSON. Structure your answer using headings (## or ###) and bullet points (- ) where appropriate. Use **bold text** to highlight key figures or conclusions.";
+            // NOTE: System prompt emphasizes JSON output with the required content in the 'answer' field.
+            const systemPrompt = "You are a market intelligence analyst. Your task is to use the provided JSON data, which contains key market insights and recommendations, to answer the user's question concisely. Only use information available in the JSON. You MUST return your answer as a single JSON object matching the provided schema. The 'answer' field must be a markdown string using headings (## or ###) and bullet points (- ) where appropriate, and **bold text** to highlight key figures or conclusions.";
             
             const userQuery = `Analyze the following JSON report data and answer the user's request.
                 
@@ -355,6 +371,11 @@
             try {
                 const payload = {
                     contents: [{ parts: [{ text: userQuery }] }],
+                    // NEW: Use responseMimeType and responseSchema to force structured JSON output
+                    generationConfig: {
+                        responseMimeType: 'application/json',
+                        responseSchema: INSIGHT_RESPONSE_SCHEMA
+                    },
                     systemInstruction: { parts: [{ text: systemPrompt }] },
                 };
 
@@ -367,20 +388,51 @@
                 
                 const result = await response.json();
                 
-                //  LLM Response Robustness Check 
-                const generatedText = result.candidates?.[0]?.content?.parts?.[0]?.text;
-
-                if (!generatedText) {
+                let generatedObject;
+                let generatedText; // This will hold the final markdown string
+                
+                // START Robust LLM JSON Output Handling
+                
+                // 1. Extract the raw text, which should be the JSON string
+                const rawJsonText = result.candidates?.[0]?.content?.parts?.[0]?.text;
+                
+                if (!rawJsonText) {
+                    // This handles cases where the API structure is malformed (e.g., model blocked response)
                     const errorJson = JSON.stringify(result, null, 2);
                     throw new Error(`Model response missing expected content structure. Full response: ${errorJson}`);
                 }
-                //  END LLM Response Robustness Check 
+
+                // 2. Clean and Safely parse the raw text into a JavaScript object
+                let cleanedJsonText = rawJsonText.trim();
+                // Handle common LLM behavior where JSON is wrapped in markdown fences
+                if (cleanedJsonText.startsWith('```json')) {
+                    cleanedJsonText = cleanedJsonText.substring(7, cleanedJsonText.lastIndexOf('```')).trim();
+                } else if (cleanedJsonText.startsWith('```')) {
+                    // Handle generic code blocks
+                    cleanedJsonText = cleanedJsonText.substring(3, cleanedJsonText.lastIndexOf('```')).trim();
+                }
+                
+                try {
+                    generatedObject = JSON.parse(cleanedJsonText);
+                } catch (jsonError) {
+                    // This is the core error handling for malformed JSON output by the LLM
+                    throw new Error(`LLM returned malformed JSON: **${jsonError.message}**. Raw output starts with: **${cleanedJsonText.substring(0, Math.min(cleanedJsonText.length, 100))}...**`);
+                }
+                
+                // 3. Validate the structure of the parsed object against the required schema field
+                generatedText = generatedObject?.answer;
+                if (typeof generatedText !== 'string' || generatedText.trim().length === 0) {
+                    throw new Error(`Malformed JSON output structure. Missing or invalid 'answer' field in the parsed object.`);
+                }
+                // END Robust LLM JSON Output Handling 
 
                 // Use innerHTML and convert Markdown for rich display
                 resultElement.innerHTML = markdownToHtml(generatedText);
 
             } catch (error) {
-                resultElement.innerHTML = markdownToHtml(`API Error: Failed to process query. Details: **${error.message}**`);
+                // Display any error from fetch, API status, or the new robustness checks
+                const errorTitle = 'AI Response Error';
+                showMessage(errorTitle, `Failed to process query. Details: **${error.message}**`, true);
                 console.error("Gemini API Error:", error);
             } finally {
                 setLoader('query', false);
@@ -415,7 +467,7 @@
                 
                 const result = await response.json();
                 
-                // LLM Response Robustness Check 
+                // LLM Response Robustness Check for non-JSON text output
                 const generatedText = result.candidates?.[0]?.content?.parts?.[0]?.text;
 
                 if (!generatedText) {
@@ -428,14 +480,18 @@
                 resultElement.innerHTML = markdownToHtml(generatedText);
 
             } catch (error) {
-                resultElement.innerHTML = markdownToHtml(`API Error: Failed to generate creative content. Details: **${error.message}**`);
+                const errorResultContainer = document.getElementById('creative-result-container');
+                errorResultContainer.innerHTML = `
+                    <h3 class="text-lg font-medium text-red-400 mb-2">AI Response Error:</h3>
+                    <div id="creative-result" class="text-gray-300 result-content space-y-3">${markdownToHtml(`Failed to generate creative content. Details: **${error.message}**`)}</div>
+                `;
                 console.error("Gemini API Error:", error);
             } finally {
                 setLoader('creative', false);
             }
         }
         
-        //  Initialization
+        //  Initialization
         document.addEventListener('DOMContentLoaded', () => {
             showPanel('query'); // Default view
         });
